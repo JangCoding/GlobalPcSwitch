@@ -1,105 +1,75 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Grid Console</title>
-    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-    <style>
-        body { background-color: #0c0c0e; color: #ffffff; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 30px 15px; }
-        .wrapper { max-width: 480px; margin: 0 auto; }
-        h1 { font-size: 24px; color: #00e676; text-align: center; margin-bottom: 25px; }
-        
-        .add-box { background: #16161a; padding: 20px; border-radius: 16px; margin-bottom: 25px; }
-        input { width: 100%; padding: 12px; margin-bottom: 12px; background: #222227; border: 1px solid #33333d; border-radius: 8px; color: #fff; box-sizing: border-box; }
-        
-        /* Disable 스타일: 비활성 버튼 */
-        .btn-add { width: 100%; padding: 12px; background: #00b0ff; color: #fff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .btn-add:disabled { background: #333; color: #777; cursor: not-allowed; }
+#include <ESP8266WiFi.h>
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
 
-        .device-card { background: #1c1c22; border-radius: 16px; padding: 20px; margin-bottom: 15px; border-left: 5px solid #00e676; position: relative; }
-        .device-name { font-size: 18px; font-weight: bold; }
-        .device-uuid { font-size: 11px; color: #555; font-family: monospace; margin-bottom: 10px; }
-        
-        .btn-group { display: flex; gap: 10px; }
-        .btn-action { flex: 1; padding: 12px; border: none; border-radius: 8px; color: #fff; cursor: pointer; font-size: 13px; }
-        .btn-pwr { background: #27ae60; }
-        .btn-frc { background: #c0392b; }
-        .btn-edit { background: #555; }
-    </style>
-</head>
-<body>
+const char* ap_ssid = "Universal_Switch_Setup";
+const byte DNS_PORT = 53;
+DNSServer dnsServer;
+ESP8266WebServer server(80);
+const int RELAY_PIN = D1;
 
-<div class="wrapper">
-    <h1>Universal Grid Console</h1>
-    
-    <div class="add-box">
-        <h3>+ 새 기기 등록</h3>
-        <input type="text" id="new-name" placeholder="기기 별명" oninput="validateForm()">
-        <input type="text" id="new-uuid" placeholder="기기 UUID" oninput="validateForm()">
-        <button id="add-btn" class="btn-add" onclick="addDevice()" disabled>제어망에 등록</button>
-    </div>
+// 기기 고유 UUID 생성 함수
+String getDeviceUUID() {
+  return "orbital-" + String(ESP.getChipId(), HEX) + String(ESP.getFlashChipId(), HEX);
+}
 
-    <div id="device-list"></div>
-</div>
+void handleSetupPage() {
+  int n = WiFi.scanNetworks();
+  String currentUUID = getDeviceUUID();
+  
+  // 1. Viewport 메타 태그 추가로 모바일 화면 최적화
+  // 2. charset UTF-8로 한글 깨짐 방지
+  String html = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><style>";
+  html += "body{background-color:#121212; color:#fff; font-family:sans-serif; text-align:center; padding:20px;}";
+  html += ".container{max-width:90%; width:400px; margin:0 auto; background:#1e1e1e; padding:20px; border-radius:20px; box-shadow:0 10px 30px rgba(0,0,0,0.5);}";
+  html += ".form-group{text-align:left; margin-bottom:15px;}";
+  html += "select, input[type='password']{width:100%; padding:12px; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:10px; box-sizing:border-box;}";
+  html += ".btn{display:block; width:100%; padding:15px; font-size:16px; font-weight:bold; color:white; background:linear-gradient(135deg, #00e676, #00b0ff); border:none; border-radius:12px; cursor:pointer;}";
+  html += ".btn-success{background:linear-gradient(135deg, #00b0ff, #00e676); margin-top:20px;}";
+  html += "#msg{margin-top:15px; font-weight:bold; min-height:20px;}";
+  html += ".hidden{display:none;}";
+  html += "</style></head><body>";
+  
+  html += "<div id='setup-ui' class='container'>";
+  html += "<h3>기기 셋업</h3><div class='form-group'><label>Wi-Fi 선택</label><select id='ssid'>";
+  for (int i = 0; i < n; ++i) { html += "<option>" + WiFi.SSID(i) + "</option>"; }
+  html += "</select></div><div class='form-group'><label>비밀번호</label><input type='password' id='pass'></div>";
+  html += "<button class='btn' onclick='verify()'>연결 및 검증</button><div id='msg'></div></div>";
 
-<script>
-    const client = mqtt.connect("wss://broker.hivemq.com:8000/mqtt");
-    let devices = JSON.parse(localStorage.getItem('global_grid_devices') || "[]");
+  html += "<div id='success-ui' class='container hidden'>";
+  html += "<h3>🟢 연결 성공!</h3><p>인터넷망으로 전환 후 버튼을 누르세요.</p>";
+  html += "<button class='btn btn-success' onclick='goToConsole()'>제어망으로 이동</button></div>";
 
-    // [피드백 반영] 입력값 체크하여 버튼 활성/비활성화
-    function validateForm() {
-        const name = document.getElementById('new-name').value;
-        const uuid = document.getElementById('new-uuid').value;
-        document.getElementById('add-btn').disabled = !(name && uuid);
-    }
+  // UUID를 URL 파라미터로 넘기는 자바스크립트 로직
+  html += "<script>var device_uuid='" + currentUUID + "'; function verify(){ var s=document.getElementById('ssid').value; var p=document.getElementById('pass').value; var m=document.getElementById('msg'); m.innerHTML='⏳ 접속 확인 중...'; fetch('/check_wifi',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p)}).then(res=>{ if(res.ok){ document.getElementById('setup-ui').classList.add('hidden'); document.getElementById('success-ui').classList.remove('hidden'); }else{ m.innerHTML='🔴 연결 실패'; m.style.color='#f44336'; } }); } function goToConsole(){ window.location.href = 'https://jangcoding.github.io/GlobalPcSwitch/?uuid='+device_uuid; }</script></body></html>";
+  server.send(200, "text/html", html);
+}
 
-    function addDevice() {
-        const name = document.getElementById('new-name').value;
-        const uuid = document.getElementById('new-uuid').value;
-        devices.push({ name, uuid });
-        saveAndRender();
-        document.getElementById('new-name').value = "";
-        document.getElementById('new-uuid').value = "";
-        validateForm();
-    }
+void handleCheckWifi() {
+  String target_ssid = server.arg("ssid");
+  String target_pass = server.arg("pass");
+  WiFi.begin(target_ssid.c_str(), target_pass.c_str());
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 25) { delay(500); attempts++; }
+  if (WiFi.status() == WL_CONNECTED) {
+    server.send(200, "text/plain", "SUCCESS");
+    delay(2000); ESP.restart();
+  } else {
+    WiFi.disconnect();
+    server.send(400, "text/plain", "FAIL");
+  }
+}
 
-    // [피드백 반영] 수정 기능: prompt로 간단히 별명/UUID 변경
-    function editDevice(index) {
-        const d = devices[index];
-        const newName = prompt("새 별명을 입력하세요:", d.name);
-        const newUuid = prompt("새 UUID를 입력하세요:", d.uuid);
-        if (newName && newUuid) {
-            devices[index] = { name: newName, uuid: newUuid };
-            saveAndRender();
-        }
-    }
+void handleNotFound() { server.sendHeader("Location", "http://192.168.4.1/", true); server.send(302, "text/plain", ""); }
 
-    function saveAndRender() {
-        localStorage.setItem('global_grid_devices', JSON.stringify(devices));
-        renderDevices();
-    }
+void setup() {
+  WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
+  WiFi.softAP(ap_ssid);
+  dnsServer.start(DNS_PORT, "*", IPAddress(192, 168, 4, 1));
+  server.on("/", handleSetupPage);
+  server.on("/check_wifi", handleCheckWifi);
+  server.onNotFound(handleNotFound);
+  server.begin();
+}
 
-    function renderDevices() {
-        const listDiv = document.getElementById('device-list');
-        listDiv.innerHTML = devices.map((d, i) => `
-            <div class="device-card">
-                <div class="device-name">${d.name}</div>
-                <div class="device-uuid">${d.uuid}</div>
-                <div class="btn-group">
-                    <button class="btn-action btn-pwr" onclick="publish('${d.uuid}', 500)">부팅</button>
-                    <button class="btn-action btn-frc" onclick="publish('${d.uuid}', 5000)">강제종료</button>
-                    <button class="btn-action btn-edit" onclick="editDevice(${i})">수정</button>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    function publish(topic, dur) {
-        client.publish(topic, JSON.stringify({action: "relay", duration: dur}));
-    }
-
-    renderDevices();
-</script>
-</body>
-</html>
+void loop() { dnsServer.processNextRequest(); server.handleClient(); }
