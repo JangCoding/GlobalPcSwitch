@@ -1,75 +1,21 @@
-#include <ESP8266WiFi.h>
-#include <DNSServer.h>
-#include <ESP8266WebServer.h>
+<input type="text" id="uuid_input" placeholder="UUID를 입력하세요">
 
-const char* ap_ssid = "Universal_Switch_Setup";
-const byte DNS_PORT = 53;
-DNSServer dnsServer;
-ESP8266WebServer server(80);
-const int RELAY_PIN = D1;
-
-// 기기 고유 UUID 생성 함수
-String getDeviceUUID() {
-  return "orbital-" + String(ESP.getChipId(), HEX) + String(ESP.getFlashChipId(), HEX);
-}
-
-void handleSetupPage() {
-  int n = WiFi.scanNetworks();
-  String currentUUID = getDeviceUUID();
-  
-  // 1. Viewport 메타 태그 추가로 모바일 화면 최적화
-  // 2. charset UTF-8로 한글 깨짐 방지
-  String html = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><style>";
-  html += "body{background-color:#121212; color:#fff; font-family:sans-serif; text-align:center; padding:20px;}";
-  html += ".container{max-width:90%; width:400px; margin:0 auto; background:#1e1e1e; padding:20px; border-radius:20px; box-shadow:0 10px 30px rgba(0,0,0,0.5);}";
-  html += ".form-group{text-align:left; margin-bottom:15px;}";
-  html += "select, input[type='password']{width:100%; padding:12px; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:10px; box-sizing:border-box;}";
-  html += ".btn{display:block; width:100%; padding:15px; font-size:16px; font-weight:bold; color:white; background:linear-gradient(135deg, #00e676, #00b0ff); border:none; border-radius:12px; cursor:pointer;}";
-  html += ".btn-success{background:linear-gradient(135deg, #00b0ff, #00e676); margin-top:20px;}";
-  html += "#msg{margin-top:15px; font-weight:bold; min-height:20px;}";
-  html += ".hidden{display:none;}";
-  html += "</style></head><body>";
-  
-  html += "<div id='setup-ui' class='container'>";
-  html += "<h3>기기 셋업</h3><div class='form-group'><label>Wi-Fi 선택</label><select id='ssid'>";
-  for (int i = 0; i < n; ++i) { html += "<option>" + WiFi.SSID(i) + "</option>"; }
-  html += "</select></div><div class='form-group'><label>비밀번호</label><input type='password' id='pass'></div>";
-  html += "<button class='btn' onclick='verify()'>연결 및 검증</button><div id='msg'></div></div>";
-
-  html += "<div id='success-ui' class='container hidden'>";
-  html += "<h3>🟢 연결 성공!</h3><p>인터넷망으로 전환 후 버튼을 누르세요.</p>";
-  html += "<button class='btn btn-success' onclick='goToConsole()'>제어망으로 이동</button></div>";
-
-  // UUID를 URL 파라미터로 넘기는 자바스크립트 로직
-  html += "<script>var device_uuid='" + currentUUID + "'; function verify(){ var s=document.getElementById('ssid').value; var p=document.getElementById('pass').value; var m=document.getElementById('msg'); m.innerHTML='⏳ 접속 확인 중...'; fetch('/check_wifi',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p)}).then(res=>{ if(res.ok){ document.getElementById('setup-ui').classList.add('hidden'); document.getElementById('success-ui').classList.remove('hidden'); }else{ m.innerHTML='🔴 연결 실패'; m.style.color='#f44336'; } }); } function goToConsole(){ window.location.href = 'https://jangcoding.github.io/GlobalPcSwitch/?uuid='+device_uuid; }</script></body></html>";
-  server.send(200, "text/html", html);
-}
-
-void handleCheckWifi() {
-  String target_ssid = server.arg("ssid");
-  String target_pass = server.arg("pass");
-  WiFi.begin(target_ssid.c_str(), target_pass.c_str());
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 25) { delay(500); attempts++; }
-  if (WiFi.status() == WL_CONNECTED) {
-    server.send(200, "text/plain", "SUCCESS");
-    delay(2000); ESP.restart();
-  } else {
-    WiFi.disconnect();
-    server.send(400, "text/plain", "FAIL");
-  }
-}
-
-void handleNotFound() { server.sendHeader("Location", "http://192.168.4.1/", true); server.send(302, "text/plain", ""); }
-
-void setup() {
-  WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
-  WiFi.softAP(ap_ssid);
-  dnsServer.start(DNS_PORT, "*", IPAddress(192, 168, 4, 1));
-  server.on("/", handleSetupPage);
-  server.on("/check_wifi", handleCheckWifi);
-  server.onNotFound(handleNotFound);
-  server.begin();
-}
-
-void loop() { dnsServer.processNextRequest(); server.handleClient(); }
+<script>
+  window.onload = function() {
+    // 1. URL 파라미터 확인
+    const params = new URLSearchParams(window.location.search);
+    const uuid = params.get('uuid');
+    
+    // 2. 파라미터가 있다면 자동 입력
+    if (uuid) {
+      document.getElementById('uuid_input').value = uuid;
+    } else {
+      // 3. 파라미터가 없다면 클립보드 붙여넣기 안내
+      navigator.clipboard.readText().then(text => {
+        if(confirm("복사된 UUID를 자동으로 입력할까요?")) {
+          document.getElementById('uuid_input').value = text;
+        }
+      });
+    }
+  };
+</script>
