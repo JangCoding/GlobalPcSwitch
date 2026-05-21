@@ -1,21 +1,66 @@
-<input type="text" id="uuid_input" placeholder="UUID를 입력하세요">
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal Grid Console</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        body { background-color: #0c0c0e; color: #ffffff; font-family: sans-serif; padding: 20px; }
+        .wrapper { max-width: 480px; margin: 0 auto; }
+        .device-card { background: #1c1c22; padding: 20px; border-radius: 16px; margin-bottom: 15px; border-left: 5px solid #00e676; }
+        input { width: 100%; padding: 10px; margin-bottom: 10px; background: #222; border: 1px solid #333; color: #fff; }
+        button:disabled { background: #333; color: #777; }
+    </style>
+</head>
+<body>
+<div class="wrapper">
+    <h1>Universal Grid Console</h1>
+    <div class="add-box">
+        <input type="text" id="new-name" placeholder="기기 별명" oninput="validateForm()">
+        <input type="text" id="new-uuid" placeholder="기기 UUID" oninput="validateForm()">
+        <button id="add-btn" onclick="addDevice()" disabled>제어망에 등록</button>
+    </div>
+    <div id="device-list"></div>
+</div>
 
 <script>
-  window.onload = function() {
-    // 1. URL 파라미터 확인
-    const params = new URLSearchParams(window.location.search);
-    const uuid = params.get('uuid');
-    
-    // 2. 파라미터가 있다면 자동 입력
-    if (uuid) {
-      document.getElementById('uuid_input').value = uuid;
-    } else {
-      // 3. 파라미터가 없다면 클립보드 붙여넣기 안내
-      navigator.clipboard.readText().then(text => {
-        if(confirm("복사된 UUID를 자동으로 입력할까요?")) {
-          document.getElementById('uuid_input').value = text;
-        }
-      });
+    const client = mqtt.connect("wss://broker.hivemq.com:8000/mqtt");
+    let devices = JSON.parse(localStorage.getItem('global_grid_devices') || "[]");
+
+    function validateForm() {
+        document.getElementById('add-btn').disabled = !(document.getElementById('new-name').value && document.getElementById('new-uuid').value);
     }
-  };
+
+    function addDevice() {
+        devices.push({ name: document.getElementById('new-name').value, uuid: document.getElementById('new-uuid').value });
+        saveAndRender();
+    }
+
+    function editDevice(i) {
+        let d = devices[i];
+        let n = prompt("새 별명:", d.name);
+        let u = prompt("새 UUID:", d.uuid);
+        if(n && u) { devices[i] = { name: n, uuid: u }; saveAndRender(); }
+    }
+
+    function saveAndRender() {
+        localStorage.setItem('global_grid_devices', JSON.stringify(devices));
+        renderDevices();
+    }
+
+    function renderDevices() {
+        document.getElementById('device-list').innerHTML = devices.map((d, i) => `
+            <div class="device-card">
+                <div>${d.name} (${d.uuid})</div>
+                <button onclick="publish('${d.uuid}')">부팅</button>
+                <button onclick="editDevice(${i})">수정</button>
+            </div>
+        `).join('');
+    }
+
+    function publish(uuid) { client.publish(uuid, '{"action":"relay"}'); }
+    renderDevices();
 </script>
+</body>
+</html>
