@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Grid Control Console</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        /* 범지구적 테크 감성의 딥 다크 모드 UI */
+        body {
+            background-color: #0c0c0e;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 30px 15px;
+        }
+        .wrapper {
+            max-width: 480px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h1 { font-size: 24px; color: #00e676; margin: 0; letter-spacing: 1px; }
+        .net-status { font-size: 12px; color: #888; margin-top: 5px; }
+        
+        /* 기기 추가 폼 스타일 */
+        .add-box {
+            background: #16161a;
+            border: 1px solid #24242b;
+            padding: 20px;
+            border-radius: 16px;
+            margin-bottom: 25px;
+        }
+        .add-box h3 { margin-top: 0; color: #00b0ff; font-size: 16px; }
+        input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 12px;
+            background: #222227;
+            border: 1px solid #33333d;
+            border-radius: 8px;
+            color: #fff;
+            box-sizing: border-box;
+        }
+        .btn-add {
+            width: 100%;
+            padding: 12px;
+            background: #00b0ff;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        /* 💡 다중 기기가 렌더링될 카드 리스트 스타일 */
+        .device-card {
+            background: #1c1c22;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 5px solid #00e676;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            position: relative;
+        }
+        .device-name { font-size: 18px; font-weight: bold; margin-bottom: 2px; }
+        .device-uuid { font-size: 11px; color: #666; font-family: monospace; }
+        
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        .btn-action {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-action:active { transform: scale(0.96); }
+        .btn-pwr { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+        .btn-frc { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+        
+        .btn-del {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: none;
+            border: none;
+            color: #555;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .btn-del:hover { color: #ff4d4d; }
+    </style>
+</head>
+<body>
+
+    <div class="wrapper">
+        <header>
+            <h1>Global Grid Control Console</h1>
+            <div class="net-status" id="net-status">🌐 MQTT 인프라 연결 중...</div>
+        </header>
+
+        <div class="add-box">
+            <h3>+ 새 Orbital 기기 등록</h3>
+            <input type="text" id="new-name" placeholder="기기 별명 (예: 안방 컴퓨터)">
+            <input type="text" id="new-uuid" placeholder="기기 고유 주소 (UUID 토픽)">
+            <button class="btn-add" onclick="addDevice()">제어망에 등록</button>
+        </div>
+
+        <div id="device-list"></div>
+    </div>
+
+    <script>
+        // 1. 무료 공용 MQTT 브로커와 브라우저 다이렉트 소켓 연결 (클라우드 서버 비용 0원)
+        const brokerUrl = "wss://broker.hivemq.com:8000/mqtt"; 
+        const client = mqtt.connect(brokerUrl);
+
+        let devices = [];
+
+        client.on('connect', () => {
+            document.getElementById('net-status').innerHTML = "🟢 글로벌 메인넷 인프라 가동 중 (정상)";
+            document.getElementById('net-status').style.color = "#00e676";
+        });
+
+        // 2. 켜지자마자 LocalStorage에서 기기 배열 로드 (DB 역할 대체)
+        window.onload = function() {
+            const savedDevices = localStorage.getItem('global_grid_devices');
+            if (savedDevices) {
+                devices = JSON.parse(savedDevices);
+            }
+            renderDevices();
+        };
+
+        // 3. 기기 등록 비즈니스 로직
+        function addDevice() {
+            const nameInput = document.getElementById('new-name');
+            const uuidInput = document.getElementById('new-uuid');
+            
+            if(!nameInput.value || !uuidInput.value) {
+                alert("정보를 모두 입력해주세요!");
+                return;
+            }
+
+            // 배열에 push
+            devices.push({ name: nameInput.value, uuid: uuidInput.value });
+            
+            // LocalStorage 영구 저장
+            localStorage.setItem('global_grid_devices', JSON.stringify(devices));
+            
+            // 인풋 초기화 및 화면 리렌더링
+            nameInput.value = "";
+            uuidInput.value = "";
+            renderDevices();
+        }
+
+        // 4. 삭제 로직
+        function deleteDevice(index) {
+            if(confirm("이 기기를 제어망에서 제외할까요?")) {
+                devices.splice(index, 1);
+                localStorage.setItem('global_grid_devices', JSON.stringify(devices));
+                renderDevices();
+            }
+        }
+
+        // 5. Client-Side 화면 렌더링 루프 (CSR)
+        function renderDevices() {
+            const listDiv = document.getElementById('device-list');
+            listDiv.innerHTML = "";
+
+            if(devices.length === 0) {
+                listDiv.innerHTML = "<p style='text-align:center; color:#555; margin-top:40px;'>등록된 기기가 없습니다.<br>상단의 셋업 UUID를 등록하세요.</p>";
+                return;
+            }
+
+            devices.forEach((device, index) => {
+                let cardHtml = `
+                    <div class="device-card">
+                        <button class="btn-del" onclick="deleteDevice(${index})">X 삭제</button>
+                        <div class="device-name">${device.name}</div>
+                        <div class="device-uuid">TOPIC: ${device.uuid}</div>
+                        <div class="btn-group">
+                            <button class="btn-action btn-pwr" onclick="publishCommand('${device.uuid}', 500)">🔌 원격 부팅 (0.5s)</button>
+                            <button class="btn-action btn-frc" onclick="publishCommand('${device.uuid}', 5000)">🔥 강제 종료 (5s)</button>
+                        </div>
+                    </div>
+                `;
+                listDiv.innerHTML += cardHtml;
+            });
+        }
+
+        // 6. ⭐️ 핵심 통신 파이프라인: 버튼 누르면 해당 기기 주소로 MQTT 패킷 즉시 슛!
+        function publishCommand(targetTopic, durationTime) {
+            if (!client.connected) {
+                alert("인프라망 연결이 불안정합니다. 잠시 후 다시 시도하세요.");
+                return;
+            }
+
+            // 장코딩 펌웨어가 파싱할 JSON 메시지 규격 정의
+            const payload = {
+                action: "relay_control",
+                duration: durationTime
+            };
+
+            // 공용 고속도로(HiveMQ)를 타고 전 세계 어디서든 집 안방 보드로 다이렉트 패킷 서빙!
+            client.publish(targetTopic, JSON.stringify(payload), { qos: 1 }, (err) => {
+                if (!err) {
+                    console.log(`패킷 발행 성공 -> 토픽: ${targetTopic}, 지속시간: ${durationTime}ms`);
+                } else {
+                    alert("패킷 발행 실패!");
+                }
+            });
+        }
+    </script>
+</body>
+</html>
